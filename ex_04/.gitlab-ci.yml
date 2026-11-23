@@ -1,0 +1,81 @@
+# ==============================================================================
+# File: .gitlab-ci.yml (Exercise 04 - SS09)
+# Mô tả: Pipeline hoàn chỉnh 3 stages: test -> build -> dockerize (Push Docker Hub)
+# ==============================================================================
+
+stages:
+  - test
+  - build
+  - dockerize
+
+cache:
+  key: "$CI_COMMIT_REF_SLUG"
+  paths:
+    - .gradle/wrapper
+    - .gradle/caches
+
+# ------------------------------------------------------------------------------
+# Stage 1: Test kết nối PostgreSQL
+# ------------------------------------------------------------------------------
+test_job:
+  stage: test
+  image: gradle:7.6-jdk17
+  services:
+    - name: postgres:14-alpine
+      alias: postgres
+  variables:
+    POSTGRES_DB: hrms_test_db
+    POSTGRES_USER: postgres
+    POSTGRES_PASSWORD: test_password
+    POSTGRES_HOST_AUTH_METHOD: trust
+    SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/hrms_test_db
+    SPRING_DATASOURCE_USERNAME: postgres
+    SPRING_DATASOURCE_PASSWORD: test_password
+  before_script:
+    - chmod +x gradlew
+  script:
+    - ./gradlew test --info
+
+# ------------------------------------------------------------------------------
+# Stage 2: Build JAR & lưu Artifacts
+# ------------------------------------------------------------------------------
+build_job:
+  stage: build
+  image: gradle:7.6-jdk17
+  before_script:
+    - chmod +x gradlew
+  script:
+    - ./gradlew build -x test
+  artifacts:
+    name: "app-jar-$CI_COMMIT_SHORT_SHA"
+    paths:
+      - build/libs/*.jar
+    expire_in: 1 day
+
+# ------------------------------------------------------------------------------
+# Stage 3: Build Docker Image từ Artifacts & Push lên Docker Hub (Docker-in-Docker)
+# ------------------------------------------------------------------------------
+dockerize_job:
+  stage: dockerize
+  image: docker:latest
+  services:
+    - docker:dind
+  variables:
+    # Cấu hình TLS cho Docker-in-Docker trên GitLab Runner
+    DOCKER_HOST: tcp://docker:2376
+    DOCKER_TLS_CERTDIR: "/certs"
+    IMAGE_NAME: "payment-service"
+    IMAGE_TAG: "1.0.0"
+  dependencies:
+    # Tự động tải lại artifact build/libs/*.jar từ build_job
+    - build_job
+  before_script:
+    # Đăng nhập Docker Hub an toàn qua biến CI/CD Variables ($DOCKER_USERNAME, $DOCKER_PASSWORD)
+    # Sử dụng --password-stdin để tránh cảnh báo bảo mật và không lộ mật khẩu ra log
+    - echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
+  script:
+    - docker build -t "$DOCKER_USERNAME/$IMAGE_NAME:$IMAGE_TAG" -t "$DOCKER_USERNAME/$IMAGE_NAME:latest" .
+    - docker push "$DOCKER_USERNAME/$IMAGE_NAME:$IMAGE_TAG"
+    - docker push "$DOCKER_USERNAME/$IMAGE_NAME:latest"
+  after_script:
+    - docker logout

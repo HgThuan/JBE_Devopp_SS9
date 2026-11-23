@@ -1,0 +1,26 @@
+# ==============================================================================
+# File: .gitlab-ci.yml (Exercise 01 - SS09)
+# Mô tả: Khắc phục lỗi cú pháp YAML mảng stages và bổ sung Docker image JDK 17
+# ==============================================================================
+
+# Sử dụng Docker image có sẵn JDK 17 & Gradle để chạy build ổn định trên GitLab Runner
+image: gradle:7.6-jdk17
+
+# Sửa lỗi cú pháp: stages phải được khai báo dưới dạng mảng (list) trong YAML
+stages:
+  - build_app
+
+# Tối ưu tốc độ build bằng cách cache thư mục .gradle
+cache:
+  key: "$CI_COMMIT_REF_SLUG"
+  paths:
+    - .gradle/wrapper
+    - .gradle/caches
+
+build_job:
+  stage: build_app
+  before_script:
+    # Đảm bảo script gradlew có quyền thực thi (tránh lỗi Permission denied)
+    - chmod +x gradlew
+  script:
+    - ./gradlew clean build -x test
